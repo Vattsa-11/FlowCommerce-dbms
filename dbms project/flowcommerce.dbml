@@ -1,0 +1,125 @@
+// FlowCommerce Database Schema in DBML
+// Use this at https://dbdiagram.io/ or with sql_to_ER tool
+
+Table customers {
+  id integer [pk, increment]
+  full_name varchar
+  email varchar [unique, not null]
+  password_hash varchar
+  phone varchar
+  address text
+  city varchar
+  state varchar
+  pincode varchar
+  country varchar [default: 'India']
+  avatar varchar
+  is_admin boolean [default: false]
+  created_at timestamp [default: `now()`]
+  updated_at timestamp [default: `now()`]
+}
+
+Table products {
+  id integer [pk, increment]
+  name varchar [not null]
+  description text
+  price numeric [not null]
+  category varchar
+  stock integer [default: 0]
+  image varchar
+  rating numeric [default: 0]
+  discount_percentage numeric [default: 0]
+  brand varchar
+  created_at timestamp [default: `now()`]
+}
+
+Table categories {
+  id integer [pk, increment]
+  name varchar [unique, not null]
+  slug varchar [unique, not null]
+  image varchar
+  product_count integer [default: 0]
+  created_at timestamp [default: `now()`]
+}
+
+Table orders {
+  id varchar [pk]
+  customer_id integer
+  customer_email varchar
+  items jsonb
+  subtotal numeric
+  shipping numeric [default: 0]
+  tax numeric [default: 0]
+  discount numeric [default: 0]
+  total numeric [not null]
+  status varchar [default: 'Processing']
+  payment_method varchar
+  payment_status varchar [default: 'Pending']
+  shipping_name varchar
+  shipping_email varchar
+  shipping_phone varchar
+  shipping_address text
+  shipping_city varchar
+  shipping_pincode varchar
+  notes text
+  created_at timestamp [default: `now()`]
+  updated_at timestamp [default: `now()`]
+}
+
+Table order_items {
+  id integer [pk, increment]
+  order_id varchar
+  product_id integer
+  product_name varchar
+  product_image varchar
+  price numeric
+  quantity integer [default: 1]
+  total numeric
+  created_at timestamp [default: `now()`]
+}
+
+Table addresses {
+  id integer [pk, increment]
+  customer_id integer
+  label varchar [default: 'Home']
+  full_address text [not null]
+  city varchar
+  state varchar
+  pincode varchar
+  country varchar [default: 'India']
+  is_default boolean [default: false]
+  created_at timestamp [default: `now()`]
+}
+
+Table cart_items {
+  id integer [pk, increment]
+  customer_id integer
+  product_id integer
+  quantity integer [default: 1]
+  created_at timestamp [default: `now()`]
+}
+
+Table wishlist_items {
+  id integer [pk, increment]
+  customer_id integer
+  product_id integer
+  created_at timestamp [default: `now()`]
+}
+
+// Relationships
+
+// Customer relationships
+Ref: addresses.customer_id > customers.id
+Ref: cart_items.customer_id > customers.id
+Ref: wishlist_items.customer_id > customers.id
+Ref: orders.customer_id > customers.id
+
+// Order relationships
+Ref: order_items.order_id > orders.id
+
+// Product relationships (soft references - product_id doesn't have FK in original schema)
+Ref: cart_items.product_id > products.id
+Ref: wishlist_items.product_id > products.id
+Ref: order_items.product_id > products.id
+
+// Note: products.category doesn't have FK to categories.name
+// This is a soft reference in the application layer
