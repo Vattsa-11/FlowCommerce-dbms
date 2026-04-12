@@ -102,14 +102,15 @@ http-server
 ## 📊 Database Schema
 
 ### Tables
-- **products** - Product catalog with pricing, stock, ratings
-- **categories** - Product categories
+- **products** - Product catalog with pricing, stock, ratings, and category (VARCHAR)
 - **customers** - User accounts and authentication
 - **orders** - Order records with shipping information
 - **order_items** - Individual items in orders
 - **addresses** - Customer saved addresses
 - **cart_items** - Shopping cart (for logged-in users)
 - **wishlist_items** - Wishlist (for logged-in users)
+
+**Note**: Product categories are dynamically generated from the `category` field in the products table.
 
 See `supabase-schema.sql` for complete schema with indexes and RLS policies.
 
@@ -209,14 +210,6 @@ This is a student project. Feedback and suggestions are welcome!
      rating DECIMAL(3, 1),
      review_count INT DEFAULT 0,
      stock INT DEFAULT 0,
-     created_at TIMESTAMP DEFAULT NOW()
-   );
-
-   -- Categories table
-   CREATE TABLE categories (
-     id BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
-     name VARCHAR(100) NOT NULL,
-     icon VARCHAR(50),
      created_at TIMESTAMP DEFAULT NOW()
    );
 
@@ -323,11 +316,6 @@ This is a student project. Feedback and suggestions are welcome!
 - Delete products
 - Add new products
 
-#### Categories Management
-- View all categories with product count
-- Edit category information
-- Delete categories
-
 #### Orders Management
 - View all orders
 - Update order status
@@ -359,7 +347,7 @@ This is a student project. Feedback and suggestions are welcome!
 #### Analytics
 - Revenue trends
 - Order status distribution
-- Top categories by product count
+- Product category analysis (derived from products)
 - Sales performance metrics
 
 #### Settings
@@ -744,12 +732,6 @@ ecommerce-frontend/
 ```sql
 INSERT INTO products (name, description, price, category_id, stock_quantity, sku) 
 VALUES ('Product Name', 'Description', 99.99, 1, 100, 'SKU-001');
-```
-
-### Adding Categories
-```sql
-INSERT INTO categories (name, description) 
-VALUES ('Category Name', 'Description');
 ```
 
 ### Changing Order Statuses
