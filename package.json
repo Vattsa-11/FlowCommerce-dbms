@@ -1,0 +1,25 @@
+{
+  "name": "flowcommerce",
+  "version": "1.0.0",
+  "description": "Premium eCommerce Platform with Supabase Backend",
+  "type": "module",
+  "scripts": {
+    "dev": "python -m http.server 3000",
+    "build": "echo 'FlowCommerce is a static site, no build required'",
+    "start": "python -m http.server 3000",
+    "preview": "python -m http.server 3000"
+  },
+  "keywords": [
+    "ecommerce",
+    "shopping",
+    "supabase",
+    "postgresql"
+  ],
+  "author": "FlowCommerce Team",
+  "license": "MIT",
+  "dependencies": {},
+  "devDependencies": {},
+  "engines": {
+    "node": "18.x"
+  }
+}

@@ -1048,7 +1048,7 @@ function addToCartFromDetail() {
   addToCartDirectly(currentProduct, quantity);
 }
 
-function addToCartDirectly(product, quantity) {
+async function addToCartDirectly(product, quantity) {
   // Allow adding to cart without login (can require login at checkout)
   const cartItem = {
     id: product.id,
@@ -1058,7 +1058,17 @@ function addToCartDirectly(product, quantity) {
     quantity: quantity || 1
   };
 
-  // Use the utils.js addToCart function
+  // If user is logged in, sync to database
+  const user = auth.getCurrentUser();
+  if (user && user.id) {
+    try {
+      await db.cart.addItem(cartItem, quantity || 1);
+    } catch (error) {
+      console.error('Error syncing cart to database:', error);
+    }
+  }
+
+  // Also save to localStorage for offline support
   let cart = getFromLocalStorage('cart') || [];
   const existingItem = cart.find(item => item.id === cartItem.id);
 
@@ -1104,10 +1114,26 @@ function toggleWishlistItem(product) {
   if (isInWishlist(product.id)) {
     removeFromWishlist(product.id);
     if (wishlistBtn) wishlistBtn.classList.remove('active');
+
+    // Sync to database if user is logged in
+    const user = auth.getCurrentUser();
+    if (user && user.id) {
+      db.wishlist.removeItem(product.id).catch(error => {
+        console.error('Error removing from wishlist in database:', error);
+      });
+    }
     showToast('Removed from wishlist', 'info');
   } else {
     addToWishlist(product);
     if (wishlistBtn) wishlistBtn.classList.add('active');
+
+    // Sync to database if user is logged in
+    const user = auth.getCurrentUser();
+    if (user && user.id) {
+      db.wishlist.addItem(product).catch(error => {
+        console.error('Error adding to wishlist in database:', error);
+      });
+    }
     showToast('Added to wishlist', 'success');
   }
 }
@@ -1260,6 +1286,27 @@ function goToCheckout() {
   if (!auth.isUserAuthenticated()) {
     showToast('Please login to checkout', 'info');
     openModal('loginModal');
+    return;
+  }
+
+  // Verify stock for all items before proceeding
+  const outOfStockItems = [];
+  cart.forEach(item => {
+    const product = allProducts.find(p => p.id === item.id);
+    if (!product || product.stock < item.quantity) {
+      outOfStockItems.push({
+        name: item.name,
+        requested: item.quantity,
+        available: product ? product.stock : 0
+      });
+    }
+  });
+
+  if (outOfStockItems.length > 0) {
+    const itemList = outOfStockItems.map(item =>
+      `${item.name}: ${item.requested} requested, ${item.available} available`
+    ).join('\n');
+    showToast('Some items are out of stock:\n' + itemList, 'error');
     return;
   }
 
@@ -1442,6 +1489,7 @@ async function placeOrder() {
   }
 
   showLoading();
+  const currentUser = auth.getCurrentUser();
 
   // Calculate total
   const subtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
@@ -1450,10 +1498,11 @@ async function placeOrder() {
   const total = subtotal + shipping + tax;
 
   try {
-    // Create order in Supabase
+    // Create order payload
     const orderId = 'FC' + Math.floor(Math.random() * 999999);
     const order = {
       id: orderId,
+      customer_id: currentUser?.id || null,
       customer_email: shipEmail,
       items: cart,
       subtotal,
@@ -1470,15 +1519,22 @@ async function placeOrder() {
       payment_method: 'Cash on Delivery'
     };
 
-    // Save to Supabase
-    await db.orders.create(order);
+    // Execute checkout atomically on database side
+    const result = await db.orders.createTransactional(order, currentUser?.id || null);
+    if (result && result.success === false) {
+      throw new Error(result.message || 'Transactional checkout failed');
+    }
 
-    // Update product stock in Supabase
+    // Update product stock in database for each item
+    // The trigger should handle this, but we also do it explicitly for safety
     await updateProductStock(cart);
 
     // Clear local cart
     removeFromLocalStorage('cart');
     updateCartBadge();
+
+    // Reload products to reflect updated stock
+    await loadProducts();
 
     hideLoading();
 
@@ -1503,7 +1559,17 @@ async function updateProductStock(cartItems) {
       const product = await db.products.getById(cartItem.id);
       if (product) {
         const newStock = Math.max(0, (product.stock || 0) - (cartItem.quantity || 1));
-        await db.products.updateStock(cartItem.id, newStock);
+        const updated = await db.products.update(cartItem.id, {
+          stock: newStock,
+          status: newStock <= 0 ? 'out_of_stock' : 'active'
+        });
+        console.log(`✓ Stock updated for product ${cartItem.id}: ${product.stock} → ${newStock}`);
+
+        // Also update local allProducts array
+        const localProduct = allProducts.find(p => p.id === cartItem.id);
+        if (localProduct) {
+          localProduct.stock = newStock;
+        }
       }
     } catch (error) {
       console.error('Stock update error for product ' + cartItem.id + ':', error);

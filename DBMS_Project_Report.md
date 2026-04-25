@@ -72,7 +72,7 @@ This project presents the design and implementation of **FlowCommerce**, a compr
 
 FlowCommerce addresses the growing need for scalable, user-friendly eCommerce platforms by implementing a robust database management system that handles complex relationships between customers, products, orders, and inventory. The platform features real-time product search, advanced filtering, shopping cart management, wishlist functionality, and comprehensive order tracking.
 
-The database architecture consists of seven normalized relational tables: **customers**, **products**, **orders**, **order_items**, **addresses**, **cart_items**, and **wishlist_items**. The system implements proper normalization up to 5NF to eliminate data redundancy and maintain data integrity through foreign key constraints and referential integrity. Product categories are stored as attributes within the products table for simplicity and flexibility.
+The database architecture uses normalized relational tables for **customers**, **products**, **categories**, **orders**, **order_items**, **shipments**, **addresses**, **cart_items**, and **wishlist_items**. The implemented design targets practical 3NF with compatibility fields retained temporarily during migration. Data integrity is enforced through foreign keys, checks, unique constraints, and transaction-safe SQL routines.
 
 Key features include a professional dark/light mode theme switching mechanism, responsive design for mobile and desktop devices, secure user authentication using Supabase Auth, real-time inventory management, and an advanced admin dashboard with analytics, order management, and database query capabilities. The platform supports INR currency with proper tax calculations and multiple payment methods.
 
@@ -148,7 +148,7 @@ The project addresses the need for efficient eCommerce database management syste
 ### 1.3 Scope
 
 **Database Features:**
-- 7 normalized relational tables (1NF to 5NF)
+- Normalized relational schema (practical 3NF) with category and shipment decomposition
 - Complex SQL queries with joins, subqueries, and aggregate functions
 - Views, triggers, and stored procedures
 - Transaction management with ACID properties
@@ -239,7 +239,7 @@ Unique: email
 PRODUCTS(id, name, description, price, category, stock, image, rating, discount_percentage, 
          brand, created_at)
 Primary Key: id
-Note: category is a VARCHAR field, not a foreign key
+Note: category text is retained temporarily for backward compatibility, while `category_id` is the normalized foreign key to CATEGORIES
 
 ORDERS(id, customer_id, customer_email, items, subtotal, shipping, tax, discount, total, 
        status, payment_method, payment_status, shipping_name, shipping_email, shipping_phone, 
@@ -1138,4 +1138,657 @@ FROM cart_items;
 ### 3.9 Summary
 
 Chapter 3 includes complex SQL implementation for all required sub-topics with minimum three question-query-output entries per section. The implementation covers constraints, aggregate functions, set operations, subqueries, joins, views, functions, procedures, triggers, cursors, and exception handling, and is aligned with Review 2 evaluation expectations.
+
+---
+
+<div style="page-break-after: always;"></div>
+
+# CHAPTER 4
+
+## ANALYZING THE PITFALLS, IDENTIFYING THE DEPENDENCIES, AND APPLYING NORMALIZATIONS
+
+---
+
+### 4.1 Analyse the Pitfalls in Relations
+
+Before normalization, ecommerce datasets are often captured in wide, mixed-granularity relations to simplify early development. In FlowCommerce, this leads to repeating groups, partial dependencies, transitive dependencies, multi-valued attributes, and join dependencies. These design issues create update, insert, and delete anomalies.
+
+**Common Pitfalls Observed:**
+- Repeating product columns in one order row (Product1, Product2, Product3)
+- Composite-key tables storing non-key descriptive attributes
+- Customer and location details duplicated in order records
+- Multi-valued attributes like tags and promotion codes stored in one row
+- Combined supplier-shipment-product facts causing high redundancy
+
+**Impact on System:**
+- Inconsistent customer and product details across transactions
+- Inventory and pricing updates require many row updates
+- Deleting one record may unintentionally remove business facts
+- Harder query optimization and constraint enforcement
+
+### 4.2 First Normal Form
+
+#### 4.2.1: Identify Dependency
+
+**Problem Relation (UNF):** `ORDER_CAPTURE_UNF`
+
+| order_id | customer_name | customer_email | product_ids | product_names | quantities | order_total |
+|----------|---------------|----------------|-------------|---------------|------------|-------------|
+| ORD-1001 | Rajesh Kumar | rajesh@email.com | 1,2 | Phone, Case | 1,2 | 82500 |
+| ORD-1002 | Priya Sharma | priya@email.com | 3 | Cooker | 1 | 1899 |
+
+**Dependencies / Issues Identified:**
+- `order_id -> customer_name, customer_email, order_total`
+- `product_ids`, `product_names`, and `quantities` are repeating groups (non-atomic values)
+- Violation: attributes are not atomic
+
+#### 4.2.2: Apply Normalization to 1NF
+
+Split repeating groups so each row contains one product per order line.
+
+**After 1NF:** `ORDER_LINES_1NF`
+
+| order_id | customer_name | customer_email | product_id | product_name | quantity | order_total |
+|----------|---------------|----------------|------------|--------------|----------|-------------|
+| ORD-1001 | Rajesh Kumar | rajesh@email.com | 1 | Phone | 1 | 82500 |
+| ORD-1001 | Rajesh Kumar | rajesh@email.com | 2 | Case | 2 | 82500 |
+| ORD-1002 | Priya Sharma | priya@email.com | 3 | Cooker | 1 | 1899 |
+
+**Result:**
+- Atomicity is achieved.
+- Each cell now stores a single value.
+
+### 4.3 Second Normal Form
+
+#### 4.3.1: Identify Dependency
+
+Consider relation with composite key `(order_id, product_id)`:
+
+**Before 2NF:** `ORDER_PRODUCT_1NF`
+
+| order_id | product_id | customer_id | customer_name | product_name | unit_price | quantity |
+|----------|------------|-------------|---------------|--------------|------------|----------|
+| ORD-1001 | 1 | 10 | Rajesh Kumar | Phone | 79999 | 1 |
+| ORD-1001 | 2 | 10 | Rajesh Kumar | Case | 1250 | 2 |
+| ORD-1002 | 3 | 11 | Priya Sharma | Cooker | 1899 | 1 |
+
+**Dependencies Identified:**
+- `(order_id, product_id) -> quantity`
+- `order_id -> customer_id, customer_name` (partial dependency)
+- `product_id -> product_name, unit_price` (partial dependency)
+
+Violation: non-key attributes depend on part of composite key.
+
+#### 4.3.2: Apply Normalization to 2NF
+
+Decompose into relations where non-key attributes depend on full key.
+
+**After 2NF Tables:**
+
+`ORDERS_2NF`
+
+| order_id | customer_id |
+|----------|-------------|
+| ORD-1001 | 10 |
+| ORD-1002 | 11 |
+
+`PRODUCTS_2NF`
+
+| product_id | product_name | unit_price |
+|------------|--------------|------------|
+| 1 | Phone | 79999 |
+| 2 | Case | 1250 |
+| 3 | Cooker | 1899 |
+
+`ORDER_ITEMS_2NF`
+
+| order_id | product_id | quantity |
+|----------|------------|----------|
+| ORD-1001 | 1 | 1 |
+| ORD-1001 | 2 | 2 |
+| ORD-1002 | 3 | 1 |
+
+`CUSTOMERS_2NF`
+
+| customer_id | customer_name |
+|-------------|---------------|
+| 10 | Rajesh Kumar |
+| 11 | Priya Sharma |
+
+**Result:**
+- Partial dependencies removed.
+- Better update consistency for customer and product details.
+
+### 4.4 Third Normal Form
+
+#### 4.4.1: Identify Dependency
+
+**Before 3NF:** `CUSTOMER_LOCATION`
+
+| customer_id | customer_name | pincode | city | state |
+|-------------|---------------|---------|------|-------|
+| 10 | Rajesh Kumar | 400058 | Mumbai | Maharashtra |
+| 11 | Priya Sharma | 110001 | Delhi | Delhi |
+
+**Dependencies Identified:**
+- `customer_id -> customer_name, pincode`
+- `pincode -> city, state`
+- Therefore `customer_id -> city, state` is transitive.
+
+Violation: transitive dependency of non-key attributes.
+
+#### 4.4.2: Apply Normalization to 3NF
+
+Decompose location details into a separate reference relation.
+
+**After 3NF Tables:**
+
+`CUSTOMERS_3NF`
+
+| customer_id | customer_name | pincode |
+|-------------|---------------|---------|
+| 10 | Rajesh Kumar | 400058 |
+| 11 | Priya Sharma | 110001 |
+
+`PINCODE_MASTER`
+
+| pincode | city | state |
+|---------|------|-------|
+| 400058 | Mumbai | Maharashtra |
+| 110001 | Delhi | Delhi |
+
+**Result:**
+- Transitive dependency removed.
+- City/state updates happen in one place only.
+
+### 4.5 BCNF
+
+#### 4.5.1: Identify Dependency
+
+Consider relation where one order can use one shipment mode and one shipment mode maps to one carrier in operational policy.
+
+**Before BCNF:** `ORDER_SHIPMENT_POLICY`
+
+| order_id | shipment_mode | carrier |
+|----------|---------------|---------|
+| ORD-1001 | EXPRESS | FastShip |
+| ORD-1002 | STANDARD | IndiaPost |
+| ORD-1003 | EXPRESS | FastShip |
+
+**Dependencies Identified:**
+- `order_id -> shipment_mode`
+- `shipment_mode -> carrier`
+
+Candidate key: `order_id`.
+Determinant `shipment_mode` is not a superkey, so BCNF is violated.
+
+#### 4.5.2: Apply Normalization to BCNF
+
+Decompose based on determinant `shipment_mode`.
+
+**After BCNF Tables:**
+
+`ORDER_SHIPMENT`
+
+| order_id | shipment_mode |
+|----------|---------------|
+| ORD-1001 | EXPRESS |
+| ORD-1002 | STANDARD |
+| ORD-1003 | EXPRESS |
+
+`SHIPMENT_MODE_CARRIER`
+
+| shipment_mode | carrier |
+|---------------|---------|
+| EXPRESS | FastShip |
+| STANDARD | IndiaPost |
+
+**Result:**
+- Every determinant is now a superkey in its relation.
+- Carrier policy changes require one update.
+
+### 4.6 Fourth Normal Form
+
+#### 4.6.1: Identify Dependency
+
+Suppose product tags and promotion codes are both multi-valued and independent.
+
+**Before 4NF:** `PRODUCT_TAG_PROMO`
+
+| product_id | tag | promo_code |
+|------------|-----|------------|
+| 1 | NewArrival | NEW10 |
+| 1 | NewArrival | FEST5 |
+| 1 | Mobile | NEW10 |
+| 1 | Mobile | FEST5 |
+
+**Multivalued Dependencies Identified:**
+- `product_id ->> tag`
+- `product_id ->> promo_code`
+
+Since independent multivalued dependencies coexist, 4NF is violated.
+
+#### 4.6.2: Apply Normalization to 4NF
+
+Separate independent multi-valued attributes.
+
+**After 4NF Tables:**
+
+`PRODUCT_TAGS`
+
+| product_id | tag |
+|------------|-----|
+| 1 | NewArrival |
+| 1 | Mobile |
+
+`PRODUCT_PROMOTIONS`
+
+| product_id | promo_code |
+|------------|------------|
+| 1 | NEW10 |
+| 1 | FEST5 |
+
+**Result:**
+- Redundant Cartesian combinations removed.
+- Insert/delete anomalies reduced significantly.
+
+### 4.7 Fifth Normal Form
+
+#### 4.7.1: Identify Dependency
+
+Business fact: a shipment assignment is valid only when a specific supplier provides a product and that supplier serves a region.
+
+**Before 5NF:** `SUPPLIER_PRODUCT_REGION`
+
+| supplier_id | product_id | region |
+|-------------|------------|--------|
+| S1 | P1 | South |
+| S1 | P2 | South |
+| S2 | P1 | North |
+
+**Join Dependency Identified:**
+The ternary relation can be losslessly reconstructed from three projections:
+- `(supplier_id, product_id)`
+- `(supplier_id, region)`
+- `(product_id, region)`
+
+When valid business semantics require these pairwise constraints, 5NF decomposition is preferred.
+
+#### 4.7.2: Apply Normalization to 5NF
+
+Decompose the ternary relation into projection tables.
+
+**After 5NF Tables:**
+
+`SUPPLIER_PRODUCT`
+
+| supplier_id | product_id |
+|-------------|------------|
+| S1 | P1 |
+| S1 | P2 |
+| S2 | P1 |
+
+`SUPPLIER_REGION`
+
+| supplier_id | region |
+|-------------|--------|
+| S1 | South |
+| S2 | North |
+
+`PRODUCT_REGION`
+
+| product_id | region |
+|------------|--------|
+| P1 | South |
+| P2 | South |
+| P1 | North |
+
+**Result:**
+- Removes remaining join anomalies in high-complexity relationships.
+- Supports flexible supplier and region expansion with controlled redundancy.
+
+### 4.8 Summary
+
+Chapter 4 analyzed major relational pitfalls and applied normalization from 1NF to 5NF using FlowCommerce-specific examples. Each normal form included dependency identification and before/after relation structures. The final schema design improves consistency, minimizes anomalies, and provides a scalable base for transaction-heavy ecommerce operations.
+
+---
+
+<div style="page-break-after: always;"></div>
+
+# CHAPTER 5
+
+## IMPLEMENTATION OF CONCURRENCY CONTROL AND RECOVERY MECHANISMS
+
+---
+
+### 5.1 Introduction to Transactions
+
+A transaction is a logical unit of work that groups one or more SQL operations and guarantees reliable database state transitions. In FlowCommerce, order placement, stock updates, payment status updates, and cart cleanup are all transaction-sensitive operations.
+
+#### 5.1.1 Properties
+
+Transactions follow ACID properties:
+
+- **Atomicity:** all operations succeed or none are applied.
+- **Consistency:** database constraints remain valid before and after transaction.
+- **Isolation:** concurrent transactions do not interfere incorrectly.
+- **Durability:** committed changes survive failures.
+
+#### 5.1.2 States
+
+Typical transaction states:
+
+1. **Active** - statements are executing.
+2. **Partially Committed** - final statement executed, commit pending.
+3. **Committed** - changes permanently saved.
+4. **Failed** - error encountered.
+5. **Aborted** - rolled back to previous consistent state.
+
+### 5.2 Transaction Control Language (TCL)
+
+TCL commands control transaction boundaries and recovery.
+
+#### 5.2.1 Save point
+
+`SAVEPOINT` creates an internal checkpoint within an active transaction.
+
+```sql
+BEGIN;
+
+UPDATE products
+SET stock = stock - 1
+WHERE id = 1;
+
+SAVEPOINT after_first_stock_update;
+```
+
+**Output:**
+- Savepoint created successfully within transaction.
+
+#### 5.2.2 Commit
+
+`COMMIT` permanently applies all changes after the last `BEGIN`.
+
+```sql
+COMMIT;
+```
+
+**Output:**
+- Transaction completed and changes persisted.
+
+#### 5.2.3 Rollback
+
+`ROLLBACK` undoes all changes in current transaction, while `ROLLBACK TO SAVEPOINT` undoes only partial changes.
+
+```sql
+ROLLBACK TO SAVEPOINT after_first_stock_update;
+-- or
+ROLLBACK;
+```
+
+**Output:**
+- Database restored to checkpoint or transaction start state.
+
+### 5.3 Create 5 Transactions for FlowCommerce and Execute
+
+#### 5.3.1 Transaction 1: Place Order and Reduce Stock Safely
+
+```sql
+BEGIN;
+
+INSERT INTO orders (
+    id, customer_id, customer_email, subtotal, shipping, tax, total,
+    status, payment_method, payment_status, shipping_name, shipping_address,
+    shipping_city, shipping_pincode
+)
+VALUES (
+    'ORD-TXN1-001', 1, 'rajesh.kumar@email.com', 79999.00, 100.00, 7200.00, 87299.00,
+    'Processing', 'UPI', 'Pending', 'Rajesh Kumar', '123 MG Road', 'Mumbai', '400058'
+);
+
+SAVEPOINT after_order_insert;
+
+INSERT INTO order_items (order_id, product_id, product_name, price, quantity, total)
+VALUES ('ORD-TXN1-001', 1, 'Samsung Galaxy S23', 79999.00, 1, 79999.00);
+
+UPDATE products
+SET stock = stock - 1
+WHERE id = 1 AND stock >= 1;
+
+COMMIT;
+```
+
+**Output:**
+- Order and order item inserted.
+- Product stock reduced by 1.
+- Transaction committed successfully.
+
+#### 5.3.2 Transaction 2: Rollback Failed Stock Update to Savepoint
+
+```sql
+BEGIN;
+
+UPDATE products
+SET stock = stock - 2
+WHERE id = 2 AND stock >= 2;
+
+SAVEPOINT stock_checked;
+
+UPDATE products
+SET stock = stock - 99999
+WHERE id = 2;
+
+-- Invalid business change detected
+ROLLBACK TO SAVEPOINT stock_checked;
+
+UPDATE products
+SET stock = stock - 1
+WHERE id = 2 AND stock >= 1;
+
+COMMIT;
+```
+
+**Output:**
+- Unsafe update reverted to savepoint.
+- Safe stock decrement executed.
+- Final transaction committed.
+
+#### 5.3.3 Transaction 3: Cart Checkout with Partial Recovery
+
+```sql
+BEGIN;
+
+INSERT INTO orders (
+    id, customer_id, customer_email, subtotal, shipping, tax, total,
+    status, payment_method, payment_status, shipping_name, shipping_address,
+    shipping_city, shipping_pincode
+)
+VALUES (
+    'ORD-TXN3-001', 2, 'priya.sharma@email.com', 4898.00, 100.00, 440.82, 5438.82,
+    'Processing', 'Credit Card', 'Paid', 'Priya Sharma', '45 Connaught Place', 'Delhi', '110001'
+);
+
+SAVEPOINT order_created;
+
+INSERT INTO order_items (order_id, product_id, product_name, price, quantity, total)
+VALUES ('ORD-TXN3-001', 2, 'Levis Jeans', 2999.00, 1, 2999.00);
+
+INSERT INTO order_items (order_id, product_id, product_name, price, quantity, total)
+VALUES ('ORD-TXN3-001', 4, 'The Alchemist', 350.00, 2, 700.00);
+
+SAVEPOINT items_inserted;
+
+DELETE FROM cart_items
+WHERE customer_id = 2;
+
+COMMIT;
+```
+
+**Output:**
+- Order generated from cart.
+- Order items inserted.
+- Customer cart cleared.
+- Transaction committed successfully.
+
+#### 5.3.4 Transaction 4: Address Update with Full Rollback
+
+```sql
+BEGIN;
+
+UPDATE addresses
+SET full_address = '999 Temporary Street', city = 'InvalidCity'
+WHERE id = 1;
+
+SAVEPOINT before_validation;
+
+-- Assume validation failed in application layer
+ROLLBACK;
+```
+
+**Output:**
+- All updates cancelled.
+- Original address remains unchanged.
+
+#### 5.3.5 Transaction 5: Payment Status and Shipment Status Synchronization
+
+```sql
+BEGIN;
+
+UPDATE orders
+SET payment_status = 'Paid'
+WHERE id = 'ORD-1738950456-XYZ34';
+
+SAVEPOINT payment_updated;
+
+UPDATE orders
+SET status = 'Shipped'
+WHERE id = 'ORD-1738950456-XYZ34'
+  AND payment_status = 'Paid';
+
+COMMIT;
+```
+
+**Output:**
+- Payment status updated first.
+- Shipment status changed only after payment check.
+- Transaction committed with consistent business state.
+
+### 5.4 Concurrency Control
+
+Concurrency control ensures correct behavior when multiple users/admins access the same records simultaneously.
+
+#### 5.4.1 Concurrency Control Algorithms
+
+Common approaches:
+
+1. **Lock-based protocols (2PL):** transactions acquire locks before data access.
+2. **Timestamp ordering:** operations ordered by transaction timestamps.
+3. **Optimistic concurrency control:** validate conflicts at commit time.
+4. **MVCC (PostgreSQL default):** readers and writers coexist with snapshot visibility.
+
+For FlowCommerce, lock-based control plus PostgreSQL MVCC is practical for order and inventory operations.
+
+#### 5.4.2 Locking Commands
+
+**a. Row-Level Locking - SELECT ... FOR UPDATE**
+
+```sql
+BEGIN;
+SELECT id, stock
+FROM products
+WHERE id = 1
+FOR UPDATE;
+
+UPDATE products
+SET stock = stock - 1
+WHERE id = 1;
+COMMIT;
+```
+
+**b. Table-Level Locking - LOCK TABLE**
+
+```sql
+BEGIN;
+LOCK TABLE products IN SHARE ROW EXCLUSIVE MODE;
+
+UPDATE products
+SET discount_percentage = 10
+WHERE category = 'Electronics';
+COMMIT;
+```
+
+**Lock Modes**
+
+| Lock Mode | Description |
+|-----------|-------------|
+| ROW SHARE | Allows concurrent access; prevents other sessions from locking the table exclusively. |
+| ROW EXCLUSIVE | Prevents other sessions from locking in share mode. Used by default for DML. |
+| SHARE | Allows queries but not updates or deletes. |
+| SHARE ROW EXCLUSIVE | A mix; more restrictive than SHARE. |
+| EXCLUSIVE | Prevents all other access and behaves like full table lock intent. |
+
+**c. COMMIT - Release All Locks**
+
+```sql
+COMMIT;
+```
+
+**d. ROLLBACK - Undo Changes and Release Locks**
+
+```sql
+ROLLBACK;
+```
+
+#### 5.4.3 Example for FlowCommerce Project
+
+**Scenario:** Two admins attempt to update stock for the same product.
+
+**Session A:**
+
+```sql
+BEGIN;
+SELECT id, stock
+FROM products
+WHERE id = 3
+FOR UPDATE;
+
+UPDATE products
+SET stock = stock - 5
+WHERE id = 3;
+-- Keep transaction open briefly
+```
+
+**Session B (runs while Session A is active):**
+
+```sql
+BEGIN;
+SELECT id, stock
+FROM products
+WHERE id = 3
+FOR UPDATE;
+```
+
+**Observed Behavior / Output:**
+- Session B waits until Session A commits or rolls back.
+- After Session A executes `COMMIT`, Session B acquires lock and continues.
+- Lost update anomaly is prevented.
+
+**Session A Completion:**
+
+```sql
+COMMIT;
+```
+
+**Session B Completion:**
+
+```sql
+UPDATE products
+SET stock = stock - 2
+WHERE id = 3;
+COMMIT;
+```
+
+### 5.5 Summary
+
+Chapter 5 implemented transaction handling, TCL usage, recovery through savepoints and rollback, and practical concurrency control for FlowCommerce. The five transaction examples demonstrate reliable order/inventory behavior, while locking examples show how concurrent operations are synchronized to preserve data consistency.
 

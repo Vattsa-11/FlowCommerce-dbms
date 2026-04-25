@@ -45,6 +45,13 @@ async function supabaseRequest(endpoint, options = {}) {
   }
 }
 
+async function supabaseRpc(functionName, payload = {}) {
+  return await supabaseRequest(`rpc/${functionName}`, {
+    method: 'POST',
+    body: payload
+  });
+}
+
 // ============================================================================
 // DATABASE OPERATIONS
 // ============================================================================
@@ -157,11 +164,12 @@ const db = {
       try {
         const product = await this.getById(id);
         if (!product) return null;
-        
-        const newStock = Math.max(0, product.stock - quantity);
-        return await this.update(id, { 
-          stock: newStock,
-          status: newStock <= 0 ? 'out_of_stock' : 'active'
+
+        // quantity parameter should be the NEW stock value
+        return await this.update(id, {
+          stock: Math.max(0, quantity),
+          status: quantity <= 0 ? 'out_of_stock' : 'active',
+          updated_at: new Date().toISOString()
         });
       } catch (error) {
         console.error('Error updating stock:', error);
@@ -324,6 +332,47 @@ const db = {
 
     async updateStatus(id, status) {
       return await this.update(id, { status, updated_at: new Date().toISOString() });
+    },
+
+    async createTransactional(orderData, customerId = null) {
+      try {
+        const payload = {
+          p_order_id: orderData.id,
+          p_customer_id: customerId,
+          p_customer_email: orderData.customer_email,
+          p_items: orderData.items,
+          p_subtotal: orderData.subtotal,
+          p_shipping: orderData.shipping,
+          p_tax: orderData.tax,
+          p_discount: orderData.discount || 0,
+          p_total: orderData.total,
+          p_payment_method: orderData.payment_method,
+          p_shipping_name: orderData.shipping_name,
+          p_shipping_email: orderData.shipping_email,
+          p_shipping_phone: orderData.shipping_phone,
+          p_shipping_address: orderData.shipping_address,
+          p_shipping_city: orderData.shipping_city,
+          p_shipping_pincode: orderData.shipping_pincode
+        };
+
+        const result = await supabaseRpc('fn_checkout_transaction', payload);
+        if (!result) {
+          throw new Error('Transactional checkout returned empty response');
+        }
+
+        if (Array.isArray(result) && result.length > 0) {
+          return result[0];
+        }
+
+        if (result.fn_checkout_transaction) {
+          return result.fn_checkout_transaction;
+        }
+
+        return result;
+      } catch (error) {
+        console.error('Error in transactional order creation:', error);
+        throw error;
+      }
     }
   },
 
@@ -398,22 +447,32 @@ const db = {
       const user = auth.getCurrentUser();
       if (user) {
         try {
-          const existing = await supabaseRequest(`cart_items?customer_id=eq.${user.id}&product_id=eq.${product.id}&select=*`);
-          
-          if (existing && existing.length > 0) {
-            await supabaseRequest(`cart_items?id=eq.${existing[0].id}`, {
-              method: 'PATCH',
-              body: { quantity: existing[0].quantity + quantity }
-            });
-          } else {
-            await supabaseRequest('cart_items', {
-              method: 'POST',
-              body: { customer_id: user.id, product_id: product.id, quantity }
-            });
-          }
+          await supabaseRpc('fn_cart_add_item', {
+            p_customer_id: user.id,
+            p_product_id: product.id,
+            p_quantity: quantity
+          });
           return true;
         } catch (error) {
-          console.error('Error adding to cart:', error);
+          console.error('Error adding to cart with RPC, falling back:', error);
+          try {
+            const existing = await supabaseRequest(`cart_items?customer_id=eq.${user.id}&product_id=eq.${product.id}&select=*`);
+
+            if (existing && existing.length > 0) {
+              await supabaseRequest(`cart_items?id=eq.${existing[0].id}`, {
+                method: 'PATCH',
+                body: { quantity: existing[0].quantity + quantity }
+              });
+            } else {
+              await supabaseRequest('cart_items', {
+                method: 'POST',
+                body: { customer_id: user.id, product_id: product.id, quantity }
+              });
+            }
+            return true;
+          } catch (fallbackError) {
+            console.error('Fallback add to cart failed:', fallbackError);
+          }
           return false;
         }
       } else {

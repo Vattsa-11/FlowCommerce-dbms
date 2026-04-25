@@ -26,11 +26,18 @@ Table products {
   description text
   price numeric [not null]
   category varchar
+  category_id integer
   stock integer [default: 0]
   image varchar
   rating numeric [default: 0]
   discount_percentage numeric [default: 0]
   brand varchar
+  created_at timestamp [default: `now()`]
+}
+
+Table categories {
+  id integer [pk, increment]
+  name varchar [unique, not null]
   created_at timestamp [default: `now()`]
 }
 
@@ -54,6 +61,20 @@ Table orders {
   shipping_city varchar
   shipping_pincode varchar
   notes text
+  created_at timestamp [default: `now()`]
+  updated_at timestamp [default: `now()`]
+}
+
+Table shipments {
+  id integer [pk, increment]
+  order_id varchar [unique, not null]
+  recipient_name varchar [not null]
+  recipient_email varchar
+  recipient_phone varchar
+  full_address text [not null]
+  city varchar
+  pincode varchar
+  status varchar [default: 'Pending']
   created_at timestamp [default: `now()`]
   updated_at timestamp [default: `now()`]
 }
@@ -105,14 +126,16 @@ Ref: addresses.customer_id > customers.id
 Ref: cart_items.customer_id > customers.id
 Ref: wishlist_items.customer_id > customers.id
 Ref: orders.customer_id > customers.id
+Ref: shipments.order_id > orders.id
 
 // Order relationships
 Ref: order_items.order_id > orders.id
+Ref: products.category_id > categories.id
 
 // Product relationships (soft references - product_id doesn't have FK in original schema)
 Ref: cart_items.product_id > products.id
 Ref: wishlist_items.product_id > products.id
 Ref: order_items.product_id > products.id
 
-// FlowCommerce uses 7 normalized tables for efficient eCommerce operations
-// Product categories are stored as VARCHAR attributes in the products table
+// FlowCommerce uses normalized core tables with compatibility fields retained during migration.
+// products.category and orders.shipping_* are kept temporarily for backward compatibility.

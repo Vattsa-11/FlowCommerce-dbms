@@ -326,3 +326,109 @@ $$;
 ## 7) Implementation File
 The same executable script is also available in:
 - `review2_lab4_6_implementation.sql`
+
+---
+
+## 8) Review 3 - Phase 1 (Normalization)
+
+```sql
+-- New normalized master table
+CREATE TABLE IF NOT EXISTS categories (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) UNIQUE NOT NULL,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Add FK column to products and backfill
+ALTER TABLE products ADD COLUMN IF NOT EXISTS category_id INTEGER;
+INSERT INTO categories (name)
+SELECT DISTINCT TRIM(category)
+FROM products
+WHERE category IS NOT NULL AND TRIM(category) <> ''
+ON CONFLICT (name) DO NOTHING;
+
+UPDATE products p
+SET category_id = c.id
+FROM categories c
+WHERE p.category_id IS NULL
+  AND TRIM(p.category) = c.name;
+
+-- Shipping details normalized
+CREATE TABLE IF NOT EXISTS shipments (
+    id SERIAL PRIMARY KEY,
+    order_id VARCHAR(50) UNIQUE NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+    recipient_name VARCHAR(255) NOT NULL,
+    recipient_email VARCHAR(255),
+    recipient_phone VARCHAR(20),
+    full_address TEXT NOT NULL,
+    city VARCHAR(100),
+    pincode VARCHAR(10),
+    status VARCHAR(50) DEFAULT 'Pending',
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+```
+
+Normalization proof points:
+- Category rename now updates one row in `categories` instead of many rows in `products`
+- Category creation without product insertion is now possible
+- Shipping data is fetched through `orders` + `shipments` join
+
+---
+
+## 9) Review 3 - Phase 2 (Transaction Control)
+
+```sql
+-- Single-call transactional checkout routine
+SELECT fn_checkout_transaction(
+    'ORD-R3-001',
+    1,
+    'demo@example.com',
+    '[{"id":1,"name":"Demo","price":100,"quantity":1}]'::jsonb,
+    100,
+    5,
+    10,
+    0,
+    115,
+    'Cash on Delivery',
+    'Demo User',
+    'demo@example.com',
+    '9000000000',
+    'No.1 Demo Street',
+    'Chennai',
+    '600001'
+);
+```
+
+Transaction guarantees demonstrated:
+- Atomicity: order, order_items, stock reduction, shipment insert, cart clear happen together
+- Consistency: stock validation trigger prevents invalid inventory states
+- Isolation: row-level locks block conflicting concurrent stock updates
+- Durability: committed order persisted in DB
+
+---
+
+## 10) Review 3 - Phase 3 (Concurrency Control)
+
+```sql
+-- Lost update prevention for cart
+CREATE UNIQUE INDEX IF NOT EXISTS uq_cart_customer_product
+ON cart_items(customer_id, product_id);
+
+-- Atomic cart upsert
+SELECT * FROM fn_cart_add_item(1, 10, 2);
+```
+
+Concurrent checkout test pattern (2 sessions):
+1. Session A inserts order_items and keeps transaction open
+2. Session B inserts same product concurrently
+3. Expected outcome: Session B waits or fails with insufficient stock after Session A commit
+
+---
+
+## 11) Updated Demo Order
+1. Run base Review 2 script
+2. Run Review 3 normalization section
+3. Validate normalized data with join queries
+4. Run transactional checkout function
+5. Run cart upsert and two-session concurrency tests
