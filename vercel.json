@@ -4,22 +4,6 @@
   "installCommand": "npm install",
   "outputDirectory": ".",
   "public": true,
-  "env": [
-    "VITE_SUPABASE_URL",
-    "VITE_SUPABASE_ANON_KEY",
-    "VITE_DATABASE_HOST",
-    "VITE_DATABASE_PORT",
-    "VITE_DATABASE_NAME",
-    "VITE_DATABASE_USER",
-    "VITE_DATABASE_PASSWORD",
-    "VITE_APP_NAME",
-    "VITE_APP_URL",
-    "VITE_ADMIN_EMAIL",
-    "VITE_ADMIN_PASSWORD",
-    "VITE_API_URL",
-    "VITE_ENVIRONMENT"
-  ],
-  "regions": ["iad1"],
   "headers": [
     {
       "source": "/(.*)",
